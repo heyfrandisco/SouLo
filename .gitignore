@@ -1,0 +1,9 @@
+*
+
+!.gitignore
+!/runs/
+!/runs/**
+!/images/
+!/images/**
+!/main.py
+!/yolo11n.pt
