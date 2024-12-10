@@ -1,7 +1,7 @@
 *
 
+!SouLo
+!SouLo/midifunctions.py
+!SouLo/soulo.py
+!SouLo/yolo11n.pt
 !.gitignore
-!/runs/
-!/runs/**
-!/main.py
-!/yolo11n.pt
