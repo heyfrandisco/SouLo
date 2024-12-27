@@ -44,34 +44,32 @@ def send_midi_to_ableton(base_chords, timeline):
 
 def save_midi_file(base_chords, timeline, filename="output.mid"):
     """Save the generated music as a MIDI file in a specific folder."""
-    # Ensure the 'midi_outputs' directory exists
     output_dir = "midi_outputs"
     os.makedirs(output_dir, exist_ok=True)
 
-    # Construct the full path for the output file
     filepath = os.path.join(output_dir, filename)
 
-    # Create the MIDI file and track
     mid = MidiFile()
     track = MidiTrack()
     mid.tracks.append(track)
 
-    # Add chords (background harmony)
-    for chord in base_chords:
-        notes = chord_to_midi(chord)
-        for note in notes:
+    # Add chords
+    for chord_event in base_chords:
+        chord = chord_event["note"]  # Extract the chord name
+        chord_notes = chord_to_midi(chord)  # Convert chord to a list of MIDI note numbers
+        for note in chord_notes:
             track.append(Message('note_on', note=note, velocity=64, time=0))
-        for note in notes:
-            track.append(Message('note_off', note=note, velocity=64, time=480))  # Time is in ticks
+        for note in chord_notes:
+            track.append(Message('note_off', note=note, velocity=64, time=480))  # Time in ticks
 
-    # Add timeline notes
+    # Add melody
     for item in timeline:
         ticks = int(item["timestamp"] * 480)  # Convert timestamp to MIDI ticks
+        length_ticks = int(item["length"] * 480)  # Convert length to MIDI ticks
         note = note_to_midi(item["note"])
         track.append(Message('note_on', note=note, velocity=64, time=ticks))
-        track.append(Message('note_off', note=note, velocity=64, time=480))  # Fixed duration
+        track.append(Message('note_off', note=note, velocity=64, time=length_ticks))
 
-    # Save the file to the specified folder
     mid.save(filepath)
     print(f"MIDI file saved as {filepath}")
 
@@ -80,7 +78,7 @@ def save_midi_file(base_chords, timeline, filename="output.mid"):
 def chord_to_midi(chord):
     """Convert chord names to MIDI note numbers."""
     chord_map = {
-        "C": [60, 64, 67],  # C major
+        "C": [60, 64, 67],
         "Cmaj7": [60, 64, 67, 71],
         "Gadd9": [67, 71, 74],
         "Fmaj7": [65, 69, 72, 76],
@@ -90,7 +88,7 @@ def chord_to_midi(chord):
         "Bm": [59, 62, 66],
         "Em": [64, 67, 71]
     }
-    return chord_map.get(chord, [60])  # Default to C major if chord not found
+    return chord_map.get(chord, [60])
 
 
 def note_to_midi(note):
