@@ -3,8 +3,9 @@ import json, torch
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import make_pipeline
-from midifunctions import save_midi_file, send_midi_to_ableton
+from midifunctions import save_midi_file, send_midi_to_ableton, adjust_chords_to_melody
 import random
+from mido import MidiFile, MidiTrack, Message, MetaMessage
 
 
 # TODO still not overlaying the label notes with chords, also problems with detections for some reason
@@ -88,6 +89,26 @@ object_notes = {
 }
 
 
+chord_notes = {
+            "C": [60, 64, 67],
+            "G": [67, 71, 74],
+            "Am": [69, 72, 76],
+            "F": [65, 69, 72],
+            "Dm": [62, 65, 69],
+            "Em": [64, 67, 71],
+            "Cmaj7": [60, 64, 67, 71],
+            "Gadd9": [67, 71, 74, 62],
+            "Fmaj7": [65, 69, 72, 76],
+            "Am7": [69, 72, 76, 79],
+            "D": [62, 66, 69],
+            "A": [69, 73, 76],
+            "Bm": [71, 74, 78],
+            "D7": [62, 66, 69, 72],
+            "F#m": [66, 69, 73],
+            "Cadd9": [60, 64, 67, 74],
+        }
+
+
 # --- FUNCTIONS ---
 
 # function to get extra data from the yolo model
@@ -140,69 +161,112 @@ def predict_mood(labels, mood_model):
     return mood_model.predict([input_text])[0]
 
 
-def generate_chords(mood):
-    """Generate chords based on the mood."""
+# UNUSED
+def generate_chords(mood, num_chords=8, chord_length=2.0):
+    """Generate a timeline of chords based on mood."""
+    selected_chords = mood_chords.get(mood, ["C", "G", "Am", "F"])
+    
     timeline = []
-    base_chords = mood_chords.get(mood, mood_chords["serene"])
-    chord_interval = 1.0  # Time between chords, can be adjusted
-    current_time = 0.0
-
-    for chord in base_chords:
-        timeline.append({"timestamp": current_time, "note": chord, "length": chord_interval})
-        current_time += chord_interval  # Proceed to the next chord
-
-    return timeline
-
-
-
-def generate_melody(detected_objects, chord_timeline):
-    """Generate melody based on detected objects and align it with chord duration."""
-    timeline = []
-
-    # Determine the total duration of the chord timeline
-    total_chord_duration = sum(chord["length"] for chord in chord_timeline)
-
-    for obj in detected_objects:
-        x_min, _, x_max, _ = obj["coords"]
-        note_length = (x_max - x_min) / 640 * total_chord_duration  # Scale note length to match chord duration
-
-        possible_notes = object_notes.get(obj["label"], ["C"])
-        note = random.choice(possible_notes)
-
+    for i in range(num_chords):
+        chord = selected_chords[i % len(selected_chords)]
+        timestamp = i * chord_length
         timeline.append({
-            "timestamp": obj["center_x"] / 640 * total_chord_duration,  # Scale timing to match chord duration
-            "note": note,
-            "length": note_length
+            "timestamp": timestamp,
+            "chord": chord,
+            "length": chord_length
         })
-
     return timeline
 
+# UNUSED
+def generate_melody(chords_timeline, detected_objects):
+    """Generate a melody that aligns with the chords."""    
+    melody_timeline = []
+    for chord in chords_timeline:
+        chord_start = chord["timestamp"]
+        chord_end = chord_start + chord["length"]
+        possible_notes = object_notes.get(random.choice(detected_objects), ["C"])
+        
+        # Generate 4 notes for each chord (0.5 seconds each)
+        for i in range(4):
+            note_start = chord_start + (i * 0.5)
+            if note_start < chord_end:
+                note = random.choice(possible_notes)
+                melody_timeline.append({
+                    "timestamp": note_start,
+                    "note": note,
+                    "length": 0.5
+                })
+    return melody_timeline
+
+#USED
+def create_midi(mood, filename="output.mid", bpm=120, chord_duration=1):
+    """
+    Create a MIDI file based on a mood's chord progression.
+    
+    Args:
+        mood (str): The mood whose chords to use.
+        filename (str): The name of the MIDI file to save.
+        bpm (int): The beats per minute for the MIDI file.
+        chord_duration (float): Duration of each chord in beats.
+    """
+    # Retrieve chord progression
+    if mood not in mood_chords:
+        print(f"Mood '{mood}' not found.")
+        return
+    
+    chords = random.sample(mood_chords[mood],4)
+    
+    
+    ticks_per_beat = 480
+    time_per_chord = int(ticks_per_beat * chord_duration)
+    
+
+    midi = MidiFile()
+    track = MidiTrack()
+    midi.tracks.append(track)
+    
+    
+    tempo = int(60_000_000 / bpm)  # Microseconds per beat
+    track.append(MetaMessage('set_tempo', tempo=tempo, time=0))
+    
+    for chord in chords:
+        if chord not in chord_notes:
+            print(f"Chord '{chord}' not defined.")
+            continue
+        
+        for note in chord_notes[chord]:
+            track.append(Message('note_on', note=note, velocity=64, time=0))
+
+        track.append(Message('note_off', note=chord_notes[chord][0], velocity=64, time=time_per_chord))
+        for note in chord_notes[chord][1:]:
+            track.append(Message('note_off', note=note, velocity=64, time=0))
+
+    midi.save(filename)
+    print(f"MIDI file saved as '{filename}'.")
 
 
 # --- MAIN ---
 
 def main():
-    file_name = "serene_playful"
+    file_name = "pets"
 
     yolo_model = YOLO("yolo11n.pt")
 
     mood_net = train_mood_net()
 
-    conf = 0.35
+    conf = 0.40
 
-    results = custom_predict(model=yolo_model, image="../images/test_images/" + file_name + ".png", conf=conf, save=True)
-    print(f"Results: {results}\n")
+    results = custom_predict(model=yolo_model, image="../images/" + file_name + ".png", conf=conf, save=True)
+    # print(f"Results: {results}\n")
 
     labels = [obj["label"] for obj in results]
+    print(f"Labels: {labels}\n")
 
     mood = predict_mood(labels, mood_net)
     print(f"Predicted Mood: {mood}\n")
 
-    chords_timeline = generate_chords(mood)
-    melody_timeline = generate_melody(results, chords_timeline)
+    create_midi(mood=mood, filename=file_name+"_chords.mid", bpm=130, chord_duration=2)
 
-    save_midi_file(chords_timeline, chords_timeline, filename=file_name + "_chords.mid")
-    save_midi_file(melody_timeline, melody_timeline, filename=file_name + "_melody.mid")
 
 if __name__ == '__main__':
     main()
