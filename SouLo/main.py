@@ -110,6 +110,7 @@ chord_notes = {
 
 
 # --- FUNCTIONS ---
+# -- ML Functions --
 
 # function to get extra data from the yolo model
 # this data will later be used to map the position of the note on the musical "grid"
@@ -161,6 +162,8 @@ def predict_mood(labels, mood_model):
     return mood_model.predict([input_text])[0]
 
 
+# -- MIDI FUNCTIONS --
+
 # UNUSED
 def generate_chords(mood, num_chords=8, chord_length=2.0):
     """Generate a timeline of chords based on mood."""
@@ -197,6 +200,7 @@ def generate_melody(chords_timeline, detected_objects):
                     "length": 0.5
                 })
     return melody_timeline
+
 
 #USED
 def create_midi(mood, filename="output.mid", bpm=120, chord_duration=1):
@@ -245,10 +249,51 @@ def create_midi(mood, filename="output.mid", bpm=120, chord_duration=1):
     print(f"MIDI file saved as '{filename}'.")
 
 
+def create_midi_melody(labels, data, filename="output.mid", bpm=120, note_duration=1):
+    """
+    Create a MIDI file based on all identified objects' notes.
+    
+    Args:
+        mood (str): The mood whose chords to use.
+        filename (str): The name of the MIDI file to save.
+        bpm (int): The beats per minute for the MIDI file.
+        note_duration (float): Duration of each chord in beats.
+    """
+    
+    midi = MidiFile()
+    track = MidiTrack()
+    midi.tracks.append(track)
+    
+    tempo = int(60_000_000 / bpm)
+    track.append(MetaMessage('set_tempo', tempo=tempo, time=0))
+    
+    ticks_per_beat = 480
+    time_per_note = int(ticks_per_beat * round((note_duration*4)/len(labels), 1))
+        
+    for label in labels:
+        if label not in object_notes:
+            print(f"label '{label}' not found.")
+            note = random.choice(["C", "D", "E", "F", "G", "A", "B"])
+        
+        else:
+            note = random.choice(object_notes[label])
+        
+        pitch = 60 + ["C", "D", "E", "F", "G", "A", "B"].index(note)
+            
+        track.append(Message('note_on', note=pitch, velocity=64, time=0))
+        track.append(Message('note_off', note=pitch, velocity=64, time=time_per_note))
+
+    midi.save(filename)
+    print(f"MIDI file saved as '{filename}'.")
+
+
 # --- MAIN ---
 
 def main():
-    file_name = "pets"
+    #TODO Args | small interface maybe?
+    file_name = "serene_playful"
+    bpm = 130
+    chord_duration = 2
 
     yolo_model = YOLO("yolo11n.pt")
 
@@ -256,8 +301,8 @@ def main():
 
     conf = 0.40
 
-    results = custom_predict(model=yolo_model, image="../images/" + file_name + ".png", conf=conf, save=True)
-    # print(f"Results: {results}\n")
+    results = custom_predict(model=yolo_model, image="../images/test_images/" + file_name + ".png", conf=conf, save=False)
+    #print(f"Results: {results}\n")
 
     labels = [obj["label"] for obj in results]
     print(f"Labels: {labels}\n")
@@ -265,7 +310,9 @@ def main():
     mood = predict_mood(labels, mood_net)
     print(f"Predicted Mood: {mood}\n")
 
-    create_midi(mood=mood, filename=file_name+"_chords.mid", bpm=130, chord_duration=2)
+    # generate chords
+    create_midi(mood=mood, filename=file_name+"_chords.mid", bpm=bpm, chord_duration=chord_duration)
+    create_midi_melody(labels=labels, data=results, filename=file_name+"_melody.mid", bpm=bpm, note_duration=chord_duration)
 
 
 if __name__ == '__main__':
