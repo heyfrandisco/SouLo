@@ -5,10 +5,11 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import make_pipeline
 from midifunctions import save_midi_file, send_midi_to_ableton, adjust_chords_to_melody
 import random
+import argparse
 from mido import MidiFile, MidiTrack, Message, MetaMessage
+import tkinter as tk
+from tkinter import ttk, filedialog
 
-
-# TODO still not overlaying the label notes with chords, also problems with detections for some reason
 
 # --- VARIABLES ---
 training_data = [
@@ -140,7 +141,7 @@ def custom_predict(model, image, conf, save):
     return detected_objects
 
 
-# prepare / process the data for mood detection
+# prepare / pro cess the data for mood detection
 def prepare_data(data):
     texts = [" ".join(objects) for objects, _ in data]
     labels = [mood for _, mood in data]
@@ -163,46 +164,6 @@ def predict_mood(labels, mood_model):
 
 
 # -- MIDI FUNCTIONS --
-
-# UNUSED
-def generate_chords(mood, num_chords=8, chord_length=2.0):
-    """Generate a timeline of chords based on mood."""
-    selected_chords = mood_chords.get(mood, ["C", "G", "Am", "F"])
-    
-    timeline = []
-    for i in range(num_chords):
-        chord = selected_chords[i % len(selected_chords)]
-        timestamp = i * chord_length
-        timeline.append({
-            "timestamp": timestamp,
-            "chord": chord,
-            "length": chord_length
-        })
-    return timeline
-
-# UNUSED
-def generate_melody(chords_timeline, detected_objects):
-    """Generate a melody that aligns with the chords."""    
-    melody_timeline = []
-    for chord in chords_timeline:
-        chord_start = chord["timestamp"]
-        chord_end = chord_start + chord["length"]
-        possible_notes = object_notes.get(random.choice(detected_objects), ["C"])
-        
-        # Generate 4 notes for each chord (0.5 seconds each)
-        for i in range(4):
-            note_start = chord_start + (i * 0.5)
-            if note_start < chord_end:
-                note = random.choice(possible_notes)
-                melody_timeline.append({
-                    "timestamp": note_start,
-                    "note": note,
-                    "length": 0.5
-                })
-    return melody_timeline
-
-
-#USED
 def create_midi(mood, filename="output.mid", bpm=120, chord_duration=1):
     """
     Create a MIDI file based on a mood's chord progression.
@@ -229,6 +190,8 @@ def create_midi(mood, filename="output.mid", bpm=120, chord_duration=1):
     track = MidiTrack()
     midi.tracks.append(track)
     
+    grid = list()
+    
     
     tempo = int(60_000_000 / bpm)  # Microseconds per beat
     track.append(MetaMessage('set_tempo', tempo=tempo, time=0))
@@ -237,6 +200,8 @@ def create_midi(mood, filename="output.mid", bpm=120, chord_duration=1):
         if chord not in chord_notes:
             print(f"Chord '{chord}' not defined.")
             continue
+        
+        grid.append(chord)
         
         for note in chord_notes[chord]:
             track.append(Message('note_on', note=note, velocity=64, time=0))
@@ -247,6 +212,8 @@ def create_midi(mood, filename="output.mid", bpm=120, chord_duration=1):
 
     midi.save(filename)
     print(f"MIDI file saved as '{filename}'.")
+    
+    return grid
 
 
 def create_midi_melody(labels, data, filename="output.mid", bpm=120, note_duration=1):
@@ -264,6 +231,8 @@ def create_midi_melody(labels, data, filename="output.mid", bpm=120, note_durati
     track = MidiTrack()
     midi.tracks.append(track)
     
+    grid = list()
+    
     tempo = int(60_000_000 / bpm)
     track.append(MetaMessage('set_tempo', tempo=tempo, time=0))
     
@@ -274,9 +243,11 @@ def create_midi_melody(labels, data, filename="output.mid", bpm=120, note_durati
         if label not in object_notes:
             print(f"label '{label}' not found.")
             note = random.choice(["C", "D", "E", "F", "G", "A", "B"])
+            grid.append(note)
         
         else:
             note = random.choice(object_notes[label])
+            grid.append(note)
         
         pitch = 60 + ["C", "D", "E", "F", "G", "A", "B"].index(note)
             
@@ -285,34 +256,82 @@ def create_midi_melody(labels, data, filename="output.mid", bpm=120, note_durati
 
     midi.save(filename)
     print(f"MIDI file saved as '{filename}'.")
+    
+    return grid
 
 
 # --- MAIN ---
-
-def main():
-    #TODO Args | small interface maybe?
-    file_name = "serene_playful"
-    bpm = 130
-    chord_duration = 2
-
+def script(file_path, bpm, chord_duration, confidence):
     yolo_model = YOLO("yolo11n.pt")
-
     mood_net = train_mood_net()
 
-    conf = 0.40
-
-    results = custom_predict(model=yolo_model, image="../images/test_images/" + file_name + ".png", conf=conf, save=False)
-    #print(f"Results: {results}\n")
-
+    results = custom_predict(
+        model=yolo_model,
+        image=file_path,
+        conf=confidence,
+        save=False
+    )
+    
     labels = [obj["label"] for obj in results]
     print(f"Labels: {labels}\n")
 
     mood = predict_mood(labels, mood_net)
     print(f"Predicted Mood: {mood}\n")
 
-    # generate chords
-    create_midi(mood=mood, filename=file_name+"_chords.mid", bpm=bpm, chord_duration=chord_duration)
-    create_midi_melody(labels=labels, data=results, filename=file_name+"_melody.mid", bpm=bpm, note_duration=chord_duration)
+    file_name = file_path.split('/')[-1].split('.')[0]
+    
+    chord_notes = create_midi(mood=mood, filename=file_name + "_chords.mid", bpm=bpm, chord_duration=chord_duration)
+    melody_notes = create_midi_melody(labels=labels, data=results, filename=file_name + "_melody.mid", bpm=bpm, note_duration=chord_duration)
+    
+    send_midi_to_ableton(chords_track=chord_notes, melody_track=melody_notes)
+
+
+def main():
+    root = tk.Tk()
+    root.title("MIDI Generator")
+
+    tk.Label(root, text="Select File").grid(row=0, column=0)
+    file_path_var = tk.StringVar()
+    
+    def select_file():
+        file_path = filedialog.askopenfilename(
+            filetypes=[("All Files", "*.*")]
+        )
+        file_path_var.set(file_path)
+
+    file_button = tk.Button(root, text="Browse", command=select_file)
+    file_button.grid(row=0, column=1)
+
+    tk.Label(root, text="BPM").grid(row=1, column=0)
+    bpm_entry = tk.Entry(root)
+    bpm_entry.insert(0, "130")
+    bpm_entry.grid(row=1, column=1)
+
+    tk.Label(root, text="Chord Duration").grid(row=2, column=0)
+    chord_duration_entry = tk.Entry(root)
+    chord_duration_entry.insert(0, "2.0")
+    chord_duration_entry.grid(row=2, column=1)
+
+    tk.Label(root, text="YOLO Confidence").grid(row=3, column=0)
+    confidence_entry = tk.Entry(root)
+    confidence_entry.insert(0, "0.4")
+    confidence_entry.grid(row=3, column=1)
+
+    def on_submit():
+        file_path = file_path_var.get()
+        bpm = int(bpm_entry.get())
+        chord_duration = float(chord_duration_entry.get())
+        confidence = float(confidence_entry.get())
+
+        if file_path:
+            script(file_path, bpm, chord_duration, confidence)
+        else:
+            print("File selection is required.")
+
+    submit_button = tk.Button(root, text="Generate MIDI", command=on_submit)
+    submit_button.grid(row=4, columnspan=2)
+
+    root.mainloop()
 
 
 if __name__ == '__main__':

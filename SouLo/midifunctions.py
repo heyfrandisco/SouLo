@@ -3,8 +3,101 @@ import time
 import rtmidi
 from mido import Message, MidiFile, MidiTrack
 
-def send_midi_to_ableton(base_chords, timeline):
-    """Sends MIDI data to a virtual MIDI port connected to Ableton Live."""
+mood_chords = {
+    "serene": ["Cmaj7", "Gadd9", "Fmaj7", "Am7"],
+    "house": ["C", "Am", "F", "G", "Dm"],
+    "urban": ["D", "A", "Bm", "G", "E"],
+    "wildlife": ["C", "E", "F", "G", "D"],
+    "playful": ["G", "D", "Em", "C", "A"],
+    "beach": ["Fmaj7", "Cadd9", "Am", "G", "D7"],
+    "winter": ["Dm", "Am", "F", "C", "Em"],
+    "campfire": ["C", "G", "Am", "F", "Dm7"],
+    "futuristic": ["Em", "Bm", "D", "A", "F#m"],
+    "spring": ["Cmaj7", "Fmaj7", "D7", "Am", "E"],
+    "night": ["Am", "Em", "Dm", "F", "G"],
+    "marine": ["G", "C", "Am", "F", "Em"],
+}
+
+
+object_notes = {
+    "tree": ["G", "A", "F"],
+    "river": ["F", "D", "C"],
+    "bird": ["E", "G", "A"],
+    "cage": ["C", "E", "G"],
+    "chair": ["D", "F", "A"],
+    "car": ["A", "C", "E"],
+    "dog": ["B", "D", "G"],
+    "lion": ["G", "C", "E"],
+    "zebra": ["F", "D", "A"],
+    "ball": ["C", "G", "E"],
+    "cat": ["E", "F", "A"],
+    "traffic": ["D", "E", "G"],
+    "building": ["G", "F", "C"],
+    "boat": ["G", "E", "F"],
+    "water": ["F", "A", "D"],
+    "fish": ["E", "G", "C"],
+    "seaweed": ["D", "F", "A"],
+    "sea": ["G", "F", "A"],
+    "elephant": ["C", "G", "D"],
+    "grass": ["F", "A", "C"],
+    "sun": ["C", "E", "G"],
+    "sand": ["A", "C", "D"],
+    "palm": ["G", "F", "A"],
+    "ocean": ["F", "D", "C"],
+    "snow": ["C", "E", "F"],
+    "mountain": ["D", "A", "F"],
+    "ski": ["A", "C", "E"],
+    "pine": ["F", "G", "D"],
+    "fire": ["B", "G", "E"],
+    "tent": ["D", "A", "F"],
+    "guitar": ["G", "B", "D"],
+    "stars": ["E", "C", "G"],
+    "robot": ["C", "E", "G"],
+    "screen": ["D", "G", "B"],
+    "keyboard": ["G", "A", "C"],
+    "lights": ["A", "E", "G"],
+    "flower": ["F", "C", "A"],
+    "butterfly": ["E", "G", "D"],
+    "bee": ["G", "A", "B"],
+    "moon": ["C", "E", "F"],
+    "owl": ["B", "G", "D"],
+    "mist": ["F", "E", "G"],
+}
+
+
+chord_notes = {
+            "C": [60, 64, 67],
+            "G": [67, 71, 74],
+            "Am": [69, 72, 76],
+            "F": [65, 69, 72],
+            "Dm": [62, 65, 69],
+            "Em": [64, 67, 71],
+            "Cmaj7": [60, 64, 67, 71],
+            "Gadd9": [67, 71, 74, 62],
+            "Fmaj7": [65, 69, 72, 76],
+            "Am7": [69, 72, 76, 79],
+            "D": [62, 66, 69],
+            "A": [69, 73, 76],
+            "Bm": [71, 74, 78],
+            "D7": [62, 66, 69, 72],
+            "F#m": [66, 69, 73],
+            "Cadd9": [60, 64, 67, 74],
+        }
+
+
+
+def note_to_midi(note_name):
+    note_mapping = {
+        'C': 60, 'C#': 61, 'D': 62, 'D#': 63, 'E': 64, 'F': 65, 'F#': 66,
+        'G': 67, 'G#': 68, 'A': 69, 'A#': 70, 'B': 71,
+        'C5': 72, 'C#5': 73, 'D5': 74, 'D#5': 75, 'E5': 76, 'F5': 77,
+        'F#5': 78, 'G5': 79, 'G#5': 80, 'A5': 81, 'A#5': 82, 'B5': 83,
+    }
+    return note_mapping[note_name]
+
+
+def send_midi_to_ableton(chords_track, melody_track):
+    """Sends MIDI data to separate channels in Ableton Live."""
     midi_out = rtmidi.MidiOut()
     available_ports = midi_out.get_ports()
 
@@ -21,22 +114,29 @@ def send_midi_to_ableton(base_chords, timeline):
     midi_out.open_port(virtual_port)
     print(f"Connected to MIDI port: {available_ports[virtual_port]}")
 
-    # Send chords (background harmony) at regular intervals
-    for chord in base_chords:
-        notes = chord_to_midi(chord)
+    def send_notes(notes, channel, duration=1):
         for note in notes:
-            midi_out.send_message([0x90, note, 64])  # Note on
-        time.sleep(1)  # Wait 1 second between chords
+            midi_out.send_message([0x90 + channel, note, 64])  # Note on with channel
+        time.sleep(duration)  # Wait duration
         for note in notes:
-            midi_out.send_message([0x80, note, 64])  # Note off
+            midi_out.send_message([0x80 + channel, note, 64])  # Note off with channel
 
-    # Send timeline notes
-    for item in timeline:
-        time.sleep(item["timestamp"])  # Wait until timestamp
-        note = note_to_midi(item["note"])
-        midi_out.send_message([0x90, note, 64])  # Note on
-        time.sleep(0.5)  # Hold note for 0.5 seconds
-        midi_out.send_message([0x80, note, 64])  # Note off
+    # Send chords to channel 1 (0 in MIDI terms)
+    for chord in chords_track:
+        if chord in chord_notes:
+            notes = chord_notes[chord]
+        else:
+            print(f"Invalid chord: {chord}")
+            continue
+        
+        send_notes(notes, channel=0)
+
+    # Send melody to channel 2 (1 in MIDI terms)
+    for note in melody_track:
+        if isinstance(note, str):
+            note = note_to_midi(note)
+        send_notes([note], channel=1)
+
 
     midi_out.close_port()
     print("Finished sending MIDI to Ableton.")
