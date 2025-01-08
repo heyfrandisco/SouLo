@@ -62,6 +62,7 @@ object_notes = {
     "moon": ["C", "E", "F"],
     "owl": ["B", "G", "D"],
     "mist": ["F", "E", "G"],
+    "person": ["A", "D", "F", "G", "E", "B"]
 }
 
 
