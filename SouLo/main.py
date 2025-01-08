@@ -9,6 +9,7 @@ import argparse
 from mido import MidiFile, MidiTrack, Message, MetaMessage
 import tkinter as tk
 from tkinter import ttk, filedialog
+from PIL import Image
 
 
 # --- VARIABLES ---
@@ -111,8 +112,23 @@ chord_notes = {
 
 
 # --- FUNCTIONS ---
-# -- ML Functions --
+# function to calculate relative size of bounding boxes
+def calculate_relative_size(bbox, image_width, image_height):
+    x1, y1, x2, y2 = bbox
+    box_width = x2 - x1
+    box_height = y2 - y1
+    box_area = box_width * box_height
+    image_area = image_width * image_height
+    relative_size = box_area / image_area
+    return relative_size
 
+# function to map relative size to MIDI velocity
+def map_size_to_velocity(relative_size, min_velocity=40, max_velocity=127):
+    velocity = int(min_velocity + (relative_size * (max_velocity - min_velocity)))
+    return max(min(velocity, max_velocity), min_velocity)
+
+
+# -- ML Functions --
 # function to get extra data from the yolo model
 # this data will later be used to map the position of the note on the musical "grid"
 def custom_predict(model, image, conf, save):
@@ -216,17 +232,7 @@ def create_midi(mood, filename="output.mid", bpm=120, chord_duration=1):
     return grid
 
 
-def create_midi_melody(labels, data, filename="output.mid", bpm=120, note_duration=1):
-    """
-    Create a MIDI file based on all identified objects' notes.
-    
-    Args:
-        mood (str): The mood whose chords to use.
-        filename (str): The name of the MIDI file to save.
-        bpm (int): The beats per minute for the MIDI file.
-        note_duration (float): Duration of each chord in beats.
-    """
-    
+def create_midi_melody(labels, data, image_width, image_height, filename="output.mid", bpm=120, note_duration=1):
     midi = MidiFile()
     track = MidiTrack()
     midi.tracks.append(track)
@@ -239,20 +245,23 @@ def create_midi_melody(labels, data, filename="output.mid", bpm=120, note_durati
     ticks_per_beat = 480
     time_per_note = int(ticks_per_beat * round((note_duration*4)/len(labels), 1))
         
-    for label in labels:
+    for label, obj_data in zip(labels, data):
+        bbox = obj_data["coords"]
+        relative_size = calculate_relative_size(bbox, image_width, image_height)
+        velocity = map_size_to_velocity(relative_size)
+        
         if label not in object_notes:
             print(f"label '{label}' not found.")
             note = random.choice(["C", "D", "E", "F", "G", "A", "B"])
             grid.append(note)
-        
         else:
             note = random.choice(object_notes[label])
             grid.append(note)
         
         pitch = 60 + ["C", "D", "E", "F", "G", "A", "B"].index(note)
-            
-        track.append(Message('note_on', note=pitch, velocity=64, time=0))
-        track.append(Message('note_off', note=pitch, velocity=64, time=time_per_note))
+        
+        track.append(Message('note_on', note=pitch, velocity=velocity, time=0))
+        track.append(Message('note_off', note=pitch, velocity=velocity, time=time_per_note))
 
     midi.save(filename)
     print(f"MIDI file saved as '{filename}'.")
@@ -277,18 +286,22 @@ def script(file_path, bpm, chord_duration, confidence):
 
     mood = predict_mood(labels, mood_net)
     print(f"Predicted Mood: {mood}\n")
-
+    
+    img = Image.open(file_path)
     file_name = file_path.split('/')[-1].split('.')[0]
     
+    width = img.width 
+    height = img.height 
+    
     chord_notes = create_midi(mood=mood, filename=file_name + "_chords.mid", bpm=bpm, chord_duration=chord_duration)
-    melody_notes = create_midi_melody(labels=labels, data=results, filename=file_name + "_melody.mid", bpm=bpm, note_duration=chord_duration)
+    melody_notes = create_midi_melody(labels=labels, data=results, image_width=width, image_height=height, filename=file_name + "_melody.mid", bpm=bpm, note_duration=chord_duration)
     
     send_midi_to_ableton(chords_track=chord_notes, melody_track=melody_notes)
 
 
 def main():
     root = tk.Tk()
-    root.title("MIDI Generator")
+    root.title("SouLo")
 
     tk.Label(root, text="Select File").grid(row=0, column=0)
     file_path_var = tk.StringVar()
